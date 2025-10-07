@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+  android:layout_width="match_parent"
+  android:layout_height="match_parent">
+
+  <LinearLayout
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+    <TextView
+      android:text="Pembuat Susunan Permutasi (Annealing 2D)"
+      android:textStyle="bold"
+      android:textSize="18sp"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"/>
+
+    <Button
+      android:id="@+id/btnPickImage"
+      android:text="Pilih Gambar Scrambled"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"/>
+
+    <EditText
+      android:id="@+id/etRows"
+      android:hint="Rows (mis. 5)"
+      android:inputType="number"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"/>
+
+    <EditText
+      android:id="@+id/etCols"
+      android:hint="Cols (mis. 5)"
+      android:inputType="number"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"/>
+
+    <EditText
+      android:id="@+id/etIterations"
+      android:hint="Num Iterations (mis. 300000)"
+      android:inputType="number"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"/>
+
+    <EditText
+      android:id="@+id/etTemp"
+      android:hint="Start Temperature (mis. 50.0)"
+      android:inputType="numberDecimal"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"/>
+
+    <Button
+      android:id="@+id/btnRun"
+      android:text="Susun & Buat Permutasi"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"/>
+
+    <ProgressBar
+      android:id="@+id/progressBar"
+      style="?android:attr/progressBarStyleHorizontal"
+      android:max="100"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"/>
+
+    <Button
+      android:id="@+id/btnCopy"
+      android:text="Copy Permutasi"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="8dp"/>
+
+    <TextView
+      android:id="@+id/tvLog"
+      android:textIsSelectable="true"
+      android:paddingTop="8dp"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"/>
+  </LinearLayout>
+</ScrollView>
