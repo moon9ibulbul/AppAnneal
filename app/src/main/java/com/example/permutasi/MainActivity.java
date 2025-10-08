@@ -7,6 +7,7 @@ import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Bundle;
 import android.text.TextUtils;
+import android.view.View;
 import android.widget.*;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -35,6 +36,10 @@ public class MainActivity extends AppCompatActivity {
   private int[] lastPerm0;        // 0-based internal
   private int lastRows = 0, lastCols = 0;
   private Bitmap srcBitmap = null;
+
+  // Toggles overlay angka (default: ON supaya langsung kelihatan)
+  private boolean showNumbersInput = true;
+  private boolean showNumbersOutput = true;
 
   private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
@@ -72,19 +77,64 @@ public class MainActivity extends AppCompatActivity {
     btnRun.setOnClickListener(v -> runAnneal());
     btnCopy.setOnClickListener(v -> copyPermutation());
     btnApplyPermutation.setOnClickListener(v -> applyManualPermutation());
+
+    // Long-press toggle angka untuk masing-masing preview
+    ivInput.setOnLongClickListener(v -> { showNumbersInput = !showNumbersInput; refreshInputPreview(); return true; });
+    ivOutput.setOnLongClickListener(v -> { showNumbersOutput = !showNumbersOutput; refreshOutputPreview(); return true; });
   }
+
+  // ==== PREVIEW INPUT ====
 
   private void loadInputPreviewAsync() {
     if (pickedImage == null) return;
     executor.execute(() -> {
       try {
         srcBitmap = BitmapIO.read(getContentResolver(), pickedImage);
-        runOnUiThread(() -> ivInput.setImageBitmap(srcBitmap));
+        runOnUiThread(this::refreshInputPreview);
       } catch (IOException e) {
         runOnUiThread(() -> toast("Gagal baca gambar: " + e.getMessage()));
       }
     });
   }
+
+  private void refreshInputPreview() {
+    if (srcBitmap == null) return;
+    // Coba ambil rows/cols dari input user agar overlay angka bisa digambar sebagai grid.
+    Integer r = tryParseInt(etRows.getText().toString().trim());
+    Integer c = tryParseInt(etCols.getText().toString().trim());
+
+    if (showNumbersInput && r != null && c != null && r > 0 && c > 0) {
+      try {
+        int[] idPerm = new int[r * c];
+        for (int i = 0; i < idPerm.length; i++) idPerm[i] = i; // identitas
+        Bitmap numbered = PermutationAnnealer2D.reconstructWithNumbers(srcBitmap, r, c, idPerm);
+        setImageFullSize(ivInput, numbered);
+        ivInput.setContentDescription("Input Preview (numbers ON)");
+        toastQuick("Angka input: ON");
+        return;
+      } catch (Throwable ignored) {
+        // fallback ke plain jika gagal
+      }
+    }
+    setImageFullSize(ivInput, srcBitmap);
+    ivInput.setContentDescription("Input Preview (numbers OFF)");
+    if (showNumbersInput) toastQuick("Angka input: OFF (rows/cols belum valid)");
+    else toastQuick("Angka input: OFF");
+  }
+
+  // ==== PREVIEW OUTPUT ====
+
+  private void refreshOutputPreview() {
+    if (srcBitmap == null || lastPerm0 == null || lastRows <= 0 || lastCols <= 0) return;
+    Bitmap out = showNumbersOutput
+        ? PermutationAnnealer2D.reconstructWithNumbers(srcBitmap, lastRows, lastCols, lastPerm0)
+        : PermutationAnnealer2D.reconstruct(srcBitmap, lastRows, lastCols, lastPerm0);
+    setImageFullSize(ivOutput, out);
+    ivOutput.setContentDescription(showNumbersOutput ? "Output Preview (numbers ON)" : "Output Preview (numbers OFF)");
+    toastQuick(showNumbersOutput ? "Angka output: ON" : "Angka output: OFF");
+  }
+
+  // ==== PROSES ANNEAL ====
 
   private void runAnneal() {
     if (pickedImage == null) { toast("Pilih gambar dulu"); return; }
@@ -111,7 +161,7 @@ public class MainActivity extends AppCompatActivity {
       try {
         if (srcBitmap == null) {
           srcBitmap = BitmapIO.read(getContentResolver(), pickedImage);
-          runOnUiThread(() -> ivInput.setImageBitmap(srcBitmap));
+          runOnUiThread(this::refreshInputPreview);
         }
         int W = srcBitmap.getWidth(), H = srcBitmap.getHeight();
         if (W % cols != 0 || H % rows != 0) {
@@ -132,11 +182,10 @@ public class MainActivity extends AppCompatActivity {
         lastPerm0 = perm0;
         lastRows = rows; lastCols = cols;
 
-        // Format 1-based untuk tampil/log/copy
         lastPermutationText = formatPermutationMatrix1Based(perm0, rows, cols);
-        Bitmap out = PermutationAnnealer2D.reconstruct(srcBitmap, rows, cols, perm0);
         runOnUiThread(() -> {
-          ivOutput.setImageBitmap(out);
+          // Tampilkan output sesuai toggle
+          refreshOutputPreview();
           etPermutation.setText(lastPermutationText);
           tvLog.append("\nPERMUTASI (1-based):\n" + lastPermutationText + "\n");
           btnRun.setEnabled(true);
@@ -151,12 +200,13 @@ public class MainActivity extends AppCompatActivity {
     });
   }
 
+  // ==== MANUAL PERMUTATION ====
+
   private void applyManualPermutation() {
     if (srcBitmap == null) { toast("Belum ada gambar"); return; }
     String txt = etPermutation.getText().toString().trim();
     if (TextUtils.isEmpty(txt)) { toast("Isi permutasi dulu"); return; }
     if (lastRows <= 0 || lastCols <= 0) {
-      // kalau belum pernah solve, ambil rows/cols dari input
       String rStr = etRows.getText().toString().trim();
       String cStr = etCols.getText().toString().trim();
       try { lastRows = Integer.parseInt(rStr); } catch (Exception ignored) {}
@@ -166,15 +216,14 @@ public class MainActivity extends AppCompatActivity {
 
     try {
       int[] perm1 = parsePermutation1Based(txt, lastRows, lastCols);
-      // convert ke 0-based internal
       int[] perm0 = new int[perm1.length];
       for (int i = 0; i < perm1.length; i++) {
         perm0[i] = perm1[i] - 1;
         if (perm0[i] < 0) throw new IllegalArgumentException("Index < 1 pada posisi " + i);
       }
       lastPerm0 = perm0;
-      Bitmap out = PermutationAnnealer2D.reconstruct(srcBitmap, lastRows, lastCols, perm0);
-      ivOutput.setImageBitmap(out);
+      // Tampilkan output sesuai toggle
+      refreshOutputPreview();
       toast("Permutasi diterapkan");
     } catch (Exception ex) {
       toast("Permutasi invalid: " + ex.getMessage());
@@ -188,14 +237,26 @@ public class MainActivity extends AppCompatActivity {
     toast("Permutasi (1-based) disalin");
   }
 
-  /** Format permutasi 1-based: [a,b,c;d,e,f;...] */
+  // ==== UTIL ====
+
+  /** Tampilkan bitmap pada ukuran asli (1:1) di dalam ImageView, bisa di-scroll. */
+  private void setImageFullSize(ImageView view, Bitmap bmp) {
+    if (bmp == null) return;
+    view.setImageBitmap(bmp);
+    if (view.getLayoutParams() != null) {
+      view.getLayoutParams().width = bmp.getWidth();
+      view.getLayoutParams().height = bmp.getHeight();
+      view.requestLayout();
+    }
+  }
+
   private static String formatPermutationMatrix1Based(int[] perm0, int rows, int cols) {
     StringBuilder sb = new StringBuilder();
     sb.append('[');
     for (int r = 0; r < rows; r++) {
       for (int c = 0; c < cols; c++) {
         int idx = r * cols + c;
-        sb.append(perm0[idx] + 1); // 1-based
+        sb.append(perm0[idx] + 1);
         if (c + 1 < cols) sb.append(',');
       }
       if (r + 1 < rows) sb.append(';');
@@ -204,9 +265,8 @@ public class MainActivity extends AppCompatActivity {
     return sb.toString();
   }
 
-  /** Parse teks 1-based ke array panjang rows*cols (tanpa whitespace bebas). */
+  /** Parse teks 1-based ke array panjang rows*cols. Format: [a,b,c;d,e,f;...] */
   private static int[] parsePermutation1Based(String text, int rows, int cols) {
-    // Contoh: [3,1,6;5,2,4]
     String t = text.trim();
     if (t.startsWith("[")) t = t.substring(1);
     if (t.endsWith("]")) t = t.substring(0, t.length()-1);
@@ -228,5 +288,14 @@ public class MainActivity extends AppCompatActivity {
     return out;
   }
 
+  private Integer tryParseInt(String s) {
+    try { return Integer.parseInt(s); } catch (Exception e) { return null; }
+  }
+
   private void toast(String s) { runOnUiThread(() -> Toast.makeText(this, s, Toast.LENGTH_SHORT).show()); }
+
+  private void toastQuick(String s) {
+    // Hindari toast beruntun terlalu panjang
+    if (!TextUtils.isEmpty(s)) Toast.makeText(this, s, Toast.LENGTH_SHORT).show();
+  }
 }
