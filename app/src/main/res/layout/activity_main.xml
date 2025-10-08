@@ -63,9 +63,63 @@
       android:layout_width="match_parent"
       android:layout_height="wrap_content"/>
 
+    <!-- PREVIEW -->
+    <TextView
+      android:text="Preview Input (Scrambled)"
+      android:textStyle="bold"
+      android:layout_marginTop="12dp"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"/>
+    <ImageView
+      android:id="@+id/ivInput"
+      android:layout_width="match_parent"
+      android:layout_height="200dp"
+      android:adjustViewBounds="true"
+      android:scaleType="centerInside"
+      android:background="#111111"
+      android:contentDescription="Input Preview"/>
+
+    <TextView
+      android:text="Preview Hasil (Unscrambled)"
+      android:textStyle="bold"
+      android:layout_marginTop="12dp"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"/>
+    <ImageView
+      android:id="@+id/ivOutput"
+      android:layout_width="match_parent"
+      android:layout_height="200dp"
+      android:adjustViewBounds="true"
+      android:scaleType="centerInside"
+      android:background="#111111"
+      android:contentDescription="Output Preview"/>
+
+    <!-- PERMUTASI -->
     <Button
       android:id="@+id/btnCopy"
-      android:text="Copy Permutasi"
+      android:text="Copy Permutasi (1-based)"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="8dp"/>
+
+    <TextView
+      android:text="Edit Permutasi (format: [a,b,c;d,e,f;...])"
+      android:layout_marginTop="12dp"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"/>
+    <EditText
+      android:id="@+id/etPermutation"
+      android:hint="[3,1,6,5,2;10,5,12,11,4;...]"
+      android:inputType="textMultiLine"
+      android:minLines="3"
+      android:maxLines="6"
+      android:gravity="top|start"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"/>
+
+    <Button
+      android:id="@+id/btnApplyPermutation"
+      android:text="Terapkan Permutasi ke Preview"
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
       android:layout_marginTop="8dp"/>
