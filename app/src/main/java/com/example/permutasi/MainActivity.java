@@ -17,19 +17,24 @@ import com.example.permutasi.core.BitmapIO;
 import com.example.permutasi.core.PermutationAnnealer2D;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class MainActivity extends AppCompatActivity {
 
-  private Button btnPickImage, btnRun, btnCopy;
-  private EditText etRows, etCols, etIterations, etTemp;
+  private Button btnPickImage, btnRun, btnCopy, btnApplyPermutation;
+  private EditText etRows, etCols, etIterations, etTemp, etPermutation;
   private ProgressBar progressBar;
   private TextView tvLog;
+  private ImageView ivInput, ivOutput;
 
   private Uri pickedImage = null;
   private String lastPermutationText = "";
+  private int[] lastPerm0;        // 0-based internal
+  private int lastRows = 0, lastCols = 0;
+  private Bitmap srcBitmap = null;
 
   private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
@@ -38,6 +43,7 @@ public class MainActivity extends AppCompatActivity {
         if (uri != null) {
           pickedImage = uri;
           toast("Gambar dipilih: " + uri);
+          loadInputPreviewAsync();
         }
       });
 
@@ -49,16 +55,35 @@ public class MainActivity extends AppCompatActivity {
     btnPickImage = findViewById(R.id.btnPickImage);
     btnRun = findViewById(R.id.btnRun);
     btnCopy = findViewById(R.id.btnCopy);
+    btnApplyPermutation = findViewById(R.id.btnApplyPermutation);
+
     etRows = findViewById(R.id.etRows);
     etCols = findViewById(R.id.etCols);
     etIterations = findViewById(R.id.etIterations);
     etTemp = findViewById(R.id.etTemp);
+    etPermutation = findViewById(R.id.etPermutation);
+
     progressBar = findViewById(R.id.progressBar);
     tvLog = findViewById(R.id.tvLog);
+    ivInput = findViewById(R.id.ivInput);
+    ivOutput = findViewById(R.id.ivOutput);
 
     btnPickImage.setOnClickListener(v -> imagePicker.launch("image/*"));
     btnRun.setOnClickListener(v -> runAnneal());
     btnCopy.setOnClickListener(v -> copyPermutation());
+    btnApplyPermutation.setOnClickListener(v -> applyManualPermutation());
+  }
+
+  private void loadInputPreviewAsync() {
+    if (pickedImage == null) return;
+    executor.execute(() -> {
+      try {
+        srcBitmap = BitmapIO.read(getContentResolver(), pickedImage);
+        runOnUiThread(() -> ivInput.setImageBitmap(srcBitmap));
+      } catch (IOException e) {
+        runOnUiThread(() -> toast("Gagal baca gambar: " + e.getMessage()));
+      }
+    });
   }
 
   private void runAnneal() {
@@ -84,8 +109,11 @@ public class MainActivity extends AppCompatActivity {
 
     executor.execute(() -> {
       try {
-        Bitmap bmp = BitmapIO.read(getContentResolver(), pickedImage);
-        int W = bmp.getWidth(), H = bmp.getHeight();
+        if (srcBitmap == null) {
+          srcBitmap = BitmapIO.read(getContentResolver(), pickedImage);
+          runOnUiThread(() -> ivInput.setImageBitmap(srcBitmap));
+        }
+        int W = srcBitmap.getWidth(), H = srcBitmap.getHeight();
         if (W % cols != 0 || H % rows != 0) {
           runOnUiThread(() ->
               tvLog.append(String.format(Locale.US,
@@ -100,12 +128,17 @@ public class MainActivity extends AppCompatActivity {
               tvLog.setText(line);
             });
 
-        int[] perm = PermutationAnnealer2D.solve(bmp, rows, cols, iterations, temp, listener);
+        int[] perm0 = PermutationAnnealer2D.solve(srcBitmap, rows, cols, iterations, temp, listener);
+        lastPerm0 = perm0;
+        lastRows = rows; lastCols = cols;
 
-        // Format permutasi jadi: [a,b,c;d,e,f;...]
-        lastPermutationText = formatPermutationMatrix(perm, rows, cols);
+        // Format 1-based untuk tampil/log/copy
+        lastPermutationText = formatPermutationMatrix1Based(perm0, rows, cols);
+        Bitmap out = PermutationAnnealer2D.reconstruct(srcBitmap, rows, cols, perm0);
         runOnUiThread(() -> {
-          tvLog.append("\nPERMUTASI:\n" + lastPermutationText + "\n");
+          ivOutput.setImageBitmap(out);
+          etPermutation.setText(lastPermutationText);
+          tvLog.append("\nPERMUTASI (1-based):\n" + lastPermutationText + "\n");
           btnRun.setEnabled(true);
           toast("Selesai");
         });
@@ -118,27 +151,81 @@ public class MainActivity extends AppCompatActivity {
     });
   }
 
+  private void applyManualPermutation() {
+    if (srcBitmap == null) { toast("Belum ada gambar"); return; }
+    String txt = etPermutation.getText().toString().trim();
+    if (TextUtils.isEmpty(txt)) { toast("Isi permutasi dulu"); return; }
+    if (lastRows <= 0 || lastCols <= 0) {
+      // kalau belum pernah solve, ambil rows/cols dari input
+      String rStr = etRows.getText().toString().trim();
+      String cStr = etCols.getText().toString().trim();
+      try { lastRows = Integer.parseInt(rStr); } catch (Exception ignored) {}
+      try { lastCols = Integer.parseInt(cStr); } catch (Exception ignored) {}
+      if (lastRows <= 0 || lastCols <= 0) { toast("Rows/Cols belum valid"); return; }
+    }
+
+    try {
+      int[] perm1 = parsePermutation1Based(txt, lastRows, lastCols);
+      // convert ke 0-based internal
+      int[] perm0 = new int[perm1.length];
+      for (int i = 0; i < perm1.length; i++) {
+        perm0[i] = perm1[i] - 1;
+        if (perm0[i] < 0) throw new IllegalArgumentException("Index < 1 pada posisi " + i);
+      }
+      lastPerm0 = perm0;
+      Bitmap out = PermutationAnnealer2D.reconstruct(srcBitmap, lastRows, lastCols, perm0);
+      ivOutput.setImageBitmap(out);
+      toast("Permutasi diterapkan");
+    } catch (Exception ex) {
+      toast("Permutasi invalid: " + ex.getMessage());
+    }
+  }
+
   private void copyPermutation() {
     if (TextUtils.isEmpty(lastPermutationText)) { toast("Belum ada permutasi"); return; }
     ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
     cm.setPrimaryClip(ClipData.newPlainText("perm", lastPermutationText));
-    toast("Permutasi disalin");
+    toast("Permutasi (1-based) disalin");
   }
 
-  private static String formatPermutationMatrix(int[] perm, int rows, int cols) {
-    // perm panjang N, indeks posisi 0..N-1 (row-major). Nilai = ID tile asal 0..N-1
+  /** Format permutasi 1-based: [a,b,c;d,e,f;...] */
+  private static String formatPermutationMatrix1Based(int[] perm0, int rows, int cols) {
     StringBuilder sb = new StringBuilder();
     sb.append('[');
     for (int r = 0; r < rows; r++) {
       for (int c = 0; c < cols; c++) {
         int idx = r * cols + c;
-        sb.append(perm[idx]);
+        sb.append(perm0[idx] + 1); // 1-based
         if (c + 1 < cols) sb.append(',');
       }
       if (r + 1 < rows) sb.append(';');
     }
     sb.append(']');
     return sb.toString();
+  }
+
+  /** Parse teks 1-based ke array panjang rows*cols (tanpa whitespace bebas). */
+  private static int[] parsePermutation1Based(String text, int rows, int cols) {
+    // Contoh: [3,1,6;5,2,4]
+    String t = text.trim();
+    if (t.startsWith("[")) t = t.substring(1);
+    if (t.endsWith("]")) t = t.substring(0, t.length()-1);
+    String[] rowParts = t.split(";");
+    if (rowParts.length != rows) throw new IllegalArgumentException("Jumlah baris != rows");
+    ArrayList<Integer> vals = new ArrayList<>(rows * cols);
+    for (String row : rowParts) {
+      row = row.trim();
+      if (row.isEmpty()) throw new IllegalArgumentException("Baris kosong");
+      String[] xs = row.split(",");
+      if (xs.length != cols) throw new IllegalArgumentException("Jumlah kolom != cols");
+      for (String s : xs) {
+        int v = Integer.parseInt(s.trim());
+        vals.add(v);
+      }
+    }
+    int[] out = new int[vals.size()];
+    for (int i = 0; i < out.length; i++) out[i] = vals.get(i);
+    return out;
   }
 
   private void toast(String s) { runOnUiThread(() -> Toast.makeText(this, s, Toast.LENGTH_SHORT).show()); }
