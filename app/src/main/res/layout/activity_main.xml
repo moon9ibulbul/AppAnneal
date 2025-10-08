@@ -63,36 +63,53 @@
       android:layout_width="match_parent"
       android:layout_height="wrap_content"/>
 
-    <!-- PREVIEW -->
+    <!-- PREVIEW INPUT -->
     <TextView
       android:text="Preview Input (Scrambled)"
       android:textStyle="bold"
       android:layout_marginTop="12dp"
       android:layout_width="wrap_content"
       android:layout_height="wrap_content"/>
-    <ImageView
-      android:id="@+id/ivInput"
-      android:layout_width="match_parent"
-      android:layout_height="200dp"
-      android:adjustViewBounds="true"
-      android:scaleType="centerInside"
-      android:background="#111111"
-      android:contentDescription="Input Preview"/>
 
+    <HorizontalScrollView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:fillViewport="false">
+      <FrameLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content">
+        <ImageView
+          android:id="@+id/ivInput"
+          android:layout_width="wrap_content"
+          android:layout_height="wrap_content"
+          android:scaleType="matrix"
+          android:contentDescription="Input Preview"/>
+      </FrameLayout>
+    </HorizontalScrollView>
+
+    <!-- PREVIEW OUTPUT -->
     <TextView
       android:text="Preview Hasil (Unscrambled)"
       android:textStyle="bold"
       android:layout_marginTop="12dp"
       android:layout_width="wrap_content"
       android:layout_height="wrap_content"/>
-    <ImageView
-      android:id="@+id/ivOutput"
+
+    <HorizontalScrollView
       android:layout_width="match_parent"
-      android:layout_height="200dp"
-      android:adjustViewBounds="true"
-      android:scaleType="centerInside"
-      android:background="#111111"
-      android:contentDescription="Output Preview"/>
+      android:layout_height="wrap_content"
+      android:fillViewport="false">
+      <FrameLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content">
+        <ImageView
+          android:id="@+id/ivOutput"
+          android:layout_width="wrap_content"
+          android:layout_height="wrap_content"
+          android:scaleType="matrix"
+          android:contentDescription="Output Preview"/>
+      </FrameLayout>
+    </HorizontalScrollView>
 
     <!-- PERMUTASI -->
     <Button
