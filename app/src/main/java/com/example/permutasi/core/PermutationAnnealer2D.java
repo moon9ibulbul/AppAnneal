@@ -1,6 +1,9 @@
 package com.example.permutasi.core;
 
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+
 import java.util.Random;
 
 public final class PermutationAnnealer2D {
@@ -11,6 +14,7 @@ public final class PermutationAnnealer2D {
 
   private PermutationAnnealer2D() {}
 
+  /** Jalankan annealing untuk menyusun grid tiles (rows×cols). Return permutasi 0-based panjang N=rows*cols. */
   public static int[] solve(Bitmap src, int rows, int cols, long iterations, double startTemp,
                             ProgressListener cb) {
     if (rows <= 0 || cols <= 0) throw new IllegalArgumentException("rows/cols harus > 0");
@@ -90,7 +94,6 @@ public final class PermutationAnnealer2D {
         int dx = c * tileW;
         int dy = r * tileH;
 
-        // copy tile pixel-per-pixel (aman untuk sisa yang tidak pas)
         int wCopy = Math.min(tileW, W - Math.max(sx, dx));
         int hCopy = Math.min(tileH, H - Math.max(sy, dy));
         if (wCopy <= 0 || hCopy <= 0) continue;
@@ -103,6 +106,43 @@ public final class PermutationAnnealer2D {
       }
     }
     return out;
+  }
+
+  /** Bangun bitmap hasil + overlay angka 1-based di pusat tiap tile (kontras). */
+  public static Bitmap reconstructWithNumbers(Bitmap src, int rows, int cols, int[] perm0) {
+    Bitmap base = reconstruct(src, rows, cols, perm0);
+    Bitmap mutable = base.copy(Bitmap.Config.ARGB_8888, true);
+    Canvas canvas = new Canvas(mutable);
+
+    int W = mutable.getWidth(), H = mutable.getHeight();
+    int tileW = Math.max(1, W / cols);
+    int tileH = Math.max(1, H / rows);
+
+    // Ukuran teks adaptif
+    float textSize = Math.max(24f, Math.min(tileW, tileH) / 2.5f);
+
+    Paint circle = new Paint(Paint.ANTI_ALIAS_FLAG);
+    circle.setStyle(Paint.Style.FILL);
+    circle.setColor(0xAA000000); // hitam semi-transparan
+
+    Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
+    text.setTextAlign(Paint.Align.CENTER);
+    text.setTextSize(textSize);
+    text.setColor(0xFFFFFFFF); // putih
+
+    for (int r = 0; r < rows; r++) {
+      for (int c = 0; c < cols; c++) {
+        int pos = r * cols + c;
+        int id1 = perm0[pos] + 1;      // tampilkan 1-based
+        float cx = c * tileW + tileW / 2f;
+        float cy = r * tileH + tileH / 2f;
+
+        float rad = Math.min(tileW, tileH) * 0.35f;
+        canvas.drawCircle(cx, cy - rad*0.1f, rad, circle);
+        canvas.drawText(String.valueOf(id1), cx, cy + textSize * 0.35f, text);
+      }
+    }
+    return mutable;
   }
 
   // ===== helper SA / cost =====
