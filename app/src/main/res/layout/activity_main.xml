@@ -52,7 +52,7 @@
 
     <Button
       android:id="@+id/btnRun"
-      android:text="Susun & Buat Permutasi"
+      android:text="Susun &amp; Buat Permutasi"
       android:layout_width="match_parent"
       android:layout_height="wrap_content"/>
 
