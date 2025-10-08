@@ -1,24 +1,8 @@
 package com.example.permutasi.core;
 
 import android.graphics.Bitmap;
-import java.util.Arrays;
 import java.util.Random;
 
-/**
- * Annealing 2D tile-permutation untuk gambar yang dipotong menjadi grid rows x cols.
- *
- * Konvensi:
- * - Gambar dipotong jadi N = rows*cols tile (row-major, ID asal 0..N-1).
- * - Kita menyusun kembali tile di grid keluaran (row-major posisi 0..N-1).
- * - Keluaran: perm[k] = ID tile asal yang diletakkan pada posisi k (row-major).
- *
- * Cost:
- * - Jumlah perbedaan tepi horizontal (kanan) dan vertikal (bawah) antar tile yang bertetangga.
- * - Makin kecil cost -> makin “nyambung”.
- *
- * Move:
- * - Swap dua posisi acak dalam konfigurasi, evaluasi delta-cost lokal (hitung ulang di tepi-tepi terpengaruh).
- */
 public final class PermutationAnnealer2D {
 
   public interface ProgressListener {
@@ -38,38 +22,29 @@ public final class PermutationAnnealer2D {
     final int tileH = Math.max(1, H / rows);
     final int N = rows * cols;
 
-    // Ekstrak piksel seluruh gambar
     int[] pixels = new int[W * H];
     src.getPixels(pixels, 0, W, 0, 0, W, H);
 
-    // Precompute tepi setiap tile (kanan & bawah) untuk perbandingan cepat
-    // Kita butuh fungsi diff horizontal (antara tepi kanan A dan tepi kiri B),
-    // dan diff vertikal (antara tepi bawah A dan tepi atas B).
-    // Untuk mempercepat, kita buat cache diff antar pasangan tile utk arah H dan V.
-    int[][] diffH = new int[N][N]; // cost jika A di kiri B (A->B)
-    int[][] diffV = new int[N][N]; // cost jika A di atas B (A->B)
-
+    int[][] diffH = new int[N][N];
+    int[][] diffV = new int[N][N];
     for (int a = 0; a < N; a++) {
       int ar = a / cols, ac = a % cols;
       for (int b = 0; b < N; b++) {
         int br = b / cols, bc = b % cols;
-        diffH[a][b] = edgeDiffVerticalStrip(pixels, W, H, ar, ac, br, bc, tileW, tileH, /*horizontal=*/true);
-        diffV[a][b] = edgeDiffVerticalStrip(pixels, W, H, ar, ac, br, bc, tileW, tileH, /*horizontal=*/false);
+        diffH[a][b] = edgeDiff(pixels, W, H, ar, ac, br, bc, tileW, tileH, true);
+        diffV[a][b] = edgeDiff(pixels, W, H, ar, ac, br, bc, tileW, tileH, false);
       }
     }
 
-    // Permutasi awal: identitas
     int[] pos2tile = new int[N];
     for (int i = 0; i < N; i++) pos2tile[i] = i;
 
-    // Hitung energi awal (jumlah cost semua pasangan tetangga)
     long energy = totalEnergy(pos2tile, rows, cols, diffH, diffV);
 
     Random rnd = new Random();
     long startTime = System.currentTimeMillis();
     long nextTick = startTime;
 
-    // Annealing (swap 2 posisi)
     for (long it = 0; it < iterations; it++) {
       double t = (double) it / (double) iterations;
       double temperature = (1.0 - t) * startTemp;
@@ -80,7 +55,6 @@ public final class PermutationAnnealer2D {
 
       long delta = deltaEnergySwap(pos2tile, rows, cols, i, j, diffH, diffV);
       if (delta <= 0 || Math.random() < fast2Pow(-delta / temperature)) {
-        // terima swap
         int tmp = pos2tile[i]; pos2tile[i] = pos2tile[j]; pos2tile[j] = tmp;
         energy += delta;
       }
@@ -89,88 +63,92 @@ public final class PermutationAnnealer2D {
         long now = System.currentTimeMillis();
         if (now >= nextTick) {
           cb.onStatus((now - startTime)/1000, t*100.0, it, temperature, energy);
-          nextTick = now + 300; // update ~3x/detik
+          nextTick = now + 300;
         }
       }
     }
-
     return pos2tile;
   }
 
-  // Hitung cost total dari konfigurasi
-  private static long totalEnergy(int[] pos2tile, int rows, int cols,
-                                  int[][] diffH, int[][] diffV) {
+  /** Bangun bitmap hasil dari permutasi 0-based (panjang rows*cols), pos row-major. */
+  public static Bitmap reconstruct(Bitmap src, int rows, int cols, int[] perm0) {
+    if (rows <= 0 || cols <= 0) throw new IllegalArgumentException("rows/cols harus > 0");
+    if (perm0 == null || perm0.length != rows*cols) throw new IllegalArgumentException("perm length mismatch");
+    final int W = src.getWidth(), H = src.getHeight();
+    final int tileW = Math.max(1, W / cols);
+    final int tileH = Math.max(1, H / rows);
+
+    Bitmap out = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);
+    for (int r = 0; r < rows; r++) {
+      for (int c = 0; c < cols; c++) {
+        int pos = r * cols + c;
+        int tileId = perm0[pos]; // 0-based: id asal
+        int tr = tileId / cols, tc = tileId % cols;
+
+        int sx = tc * tileW;
+        int sy = tr * tileH;
+        int dx = c * tileW;
+        int dy = r * tileH;
+
+        // copy tile pixel-per-pixel (aman untuk sisa yang tidak pas)
+        int wCopy = Math.min(tileW, W - Math.max(sx, dx));
+        int hCopy = Math.min(tileH, H - Math.max(sy, dy));
+        if (wCopy <= 0 || hCopy <= 0) continue;
+
+        int[] line = new int[wCopy];
+        for (int y = 0; y < hCopy; y++) {
+          src.getPixels(line, 0, wCopy, sx, sy + y, wCopy, 1);
+          out.setPixels(line, 0, wCopy, dx, dy + y, wCopy, 1);
+        }
+      }
+    }
+    return out;
+  }
+
+  // ===== helper SA / cost =====
+
+  private static long totalEnergy(int[] pos2tile, int rows, int cols, int[][] diffH, int[][] diffV) {
     long e = 0;
     for (int r = 0; r < rows; r++) {
       for (int c = 0; c < cols; c++) {
         int p = r*cols + c;
         int a = pos2tile[p];
-        if (c + 1 < cols) {
-          int b = pos2tile[p+1];
-          e += diffH[a][b];
-        }
-        if (r + 1 < rows) {
-          int b = pos2tile[p+cols];
-          e += diffV[a][b];
-        }
+        if (c + 1 < cols) e += diffH[a][pos2tile[p+1]];
+        if (r + 1 < rows) e += diffV[a][pos2tile[p+cols]];
       }
     }
     return e;
   }
 
-  // Hitung perubahan energi jika swap posisi i dan j
   private static long deltaEnergySwap(int[] pos2tile, int rows, int cols, int i, int j,
                                       int[][] diffH, int[][] diffV) {
     if (i == j) return 0;
     if (j < i) { int t = i; i = j; j = t; }
-
-    // Pos tetangga yang terdampak adalah i dan j beserta kiri/kanan/atas/bawah masing-masing.
-    // Kita hitung energi lokal sebelum & sesudah.
     long before = localEnergyAt(pos2tile, rows, cols, i, diffH, diffV)
                 + localEnergyAt(pos2tile, rows, cols, j, diffH, diffV);
-    // swap
     int ai = pos2tile[i], aj = pos2tile[j];
     pos2tile[i] = aj; pos2tile[j] = ai;
     long after = localEnergyAt(pos2tile, rows, cols, i, diffH, diffV)
                + localEnergyAt(pos2tile, rows, cols, j, diffH, diffV);
-    // revert
     pos2tile[i] = ai; pos2tile[j] = aj;
     return after - before;
   }
 
-  // Energi lokal di sekitar posisi p (hanya edge yang melibatkan p)
   private static long localEnergyAt(int[] pos2tile, int rows, int cols, int p,
                                     int[][] diffH, int[][] diffV) {
     int r = p / cols, c = p % cols;
     int a = pos2tile[p];
     long e = 0;
-    // kiri
-    if (c - 1 >= 0) {
-      int left = pos2tile[p - 1];
-      e += diffH[left][a];
-    }
-    // kanan
-    if (c + 1 < cols) {
-      int right = pos2tile[p + 1];
-      e += diffH[a][right];
-    }
-    // atas
-    if (r - 1 >= 0) {
-      int up = pos2tile[p - cols];
-      e += diffV[up][a];
-    }
-    // bawah
-    if (r + 1 < rows) {
-      int down = pos2tile[p + cols];
-      e += diffV[a][down];
-    }
+    if (c - 1 >= 0) e += diffH[pos2tile[p - 1]][a];
+    if (c + 1 < cols) e += diffH[a][pos2tile[p + 1]];
+    if (r - 1 >= 0) e += diffV[pos2tile[p - cols]][a];
+    if (r + 1 < rows) e += diffV[a][pos2tile[p + cols]];
     return e;
   }
 
-  // Hitung perbedaan di sepanjang strip tepi (vertikal untuk horizontal-join, horizontal untuk vertical-join)
-  private static int edgeDiffVerticalStrip(int[] px, int W, int H,
-                                           int ar, int ac, int br, int bc,
-                                           int tileW, int tileH, boolean horizontal) {
+  private static int edgeDiff(int[] px, int W, int H,
+                              int ar, int ac, int br, int bc,
+                              int tileW, int tileH, boolean horizontal) {
     int ax = ac * tileW;
     int ay = ar * tileH;
     int bx = bc * tileW;
@@ -178,31 +156,21 @@ public final class PermutationAnnealer2D {
     int diff = 0;
 
     if (horizontal) {
-      // bandingkan tepi kanan tile A dengan tepi kiri tile B
       int xA = Math.min(W - 1, ax + tileW - 1);
       int xB = bx;
-      int h = Math.min(tileH, H - ay);
-      int h2 = Math.min(tileH, H - by);
-      int hh = Math.min(h, h2);
+      int hh = Math.min(Math.min(tileH, H - ay), Math.min(tileH, H - by));
       for (int k = 0; k < hh; k++) {
-        int yA = ay + k;
-        int yB = by + k;
-        int pA = px[yA * W + xA];
-        int pB = px[yB * W + xB];
+        int pA = px[(ay + k) * W + xA];
+        int pB = px[(by + k) * W + xB];
         diff += rgbAbsDiff(pA, pB);
       }
     } else {
-      // bandingkan tepi bawah tile A dengan tepi atas tile B
       int yA = Math.min(H - 1, ay + tileH - 1);
       int yB = by;
-      int w = Math.min(tileW, W - ax);
-      int w2 = Math.min(tileW, W - bx);
-      int ww = Math.min(w, w2);
+      int ww = Math.min(Math.min(tileW, W - ax), Math.min(tileW, W - bx));
       for (int k = 0; k < ww; k++) {
-        int xA = ax + k;
-        int xB = bx + k;
-        int pA = px[yA * W + xA];
-        int pB = px[yB * W + xB];
+        int pA = px[yA * W + (ax + k)];
+        int pB = px[yB * W + (bx + k)];
         diff += rgbAbsDiff(pA, pB);
       }
     }
@@ -217,7 +185,6 @@ public final class PermutationAnnealer2D {
     return d;
   }
 
-  // 2^x approx untuk probabilitas SA
   private static double fast2Pow(double x) {
     if (x < -1022) return 0;
     if (x >= 1024) return Double.POSITIVE_INFINITY;
