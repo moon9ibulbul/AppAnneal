@@ -4,12 +4,17 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 
+import java.util.Arrays;
 import java.util.Random;
 
 public final class PermutationAnnealer2D {
 
   public interface ProgressListener {
     void onStatus(long seconds, double donePct, long iter, double temperature, long energy);
+  }
+
+  public interface TileMatchProgressListener {
+    void onProgress(int done, int total);
   }
 
   private PermutationAnnealer2D() {}
@@ -72,6 +77,40 @@ public final class PermutationAnnealer2D {
       }
     }
     return pos2tile;
+  }
+
+  /** Cocokkan tile terhadap bitmap referensi terurut dan kembalikan permutasi 0-based. */
+  public static int[] solveUsingReference(Bitmap scrambled, Bitmap reference, int rows, int cols,
+                                          TileMatchProgressListener progress) {
+    if (rows <= 0 || cols <= 0) throw new IllegalArgumentException("rows/cols harus > 0");
+    final int N = rows * cols;
+    if (progress != null) progress.onProgress(0, N);
+
+    final int W = scrambled.getWidth();
+    final int H = scrambled.getHeight();
+
+    Bitmap refScaled = reference;
+    if (reference.getWidth() != W || reference.getHeight() != H) {
+      refScaled = Bitmap.createScaledBitmap(reference, W, H, true);
+    }
+
+    final int tileW = Math.max(1, W / cols);
+    final int tileH = Math.max(1, H / rows);
+
+    int[] pxScrambled = new int[W * H];
+    scrambled.getPixels(pxScrambled, 0, W, 0, 0, W, H);
+    int[] pxReference = new int[W * H];
+    refScaled.getPixels(pxReference, 0, W, 0, 0, W, H);
+
+    long[][] cost = new long[N][N];
+    for (int orig = 0; orig < N; orig++) {
+      for (int scr = 0; scr < N; scr++) {
+        cost[orig][scr] = tileDifference(pxReference, pxScrambled, W, H, rows, cols, tileW, tileH, orig, scr);
+      }
+      if (progress != null) progress.onProgress(orig + 1, N);
+    }
+
+    return hungarian(cost);
   }
 
   /** Bangun bitmap hasil dari permutasi 0-based (panjang rows*cols), pos row-major. */
@@ -223,6 +262,92 @@ public final class PermutationAnnealer2D {
       d += Math.abs(((p0 >>> (i * 8)) & 0xFF) - ((p1 >>> (i * 8)) & 0xFF));
     }
     return d;
+  }
+
+  private static long tileDifference(int[] pxA, int[] pxB, int W, int H,
+                                     int rows, int cols, int tileW, int tileH,
+                                     int tileA, int tileB) {
+    int ar = tileA / cols, ac = tileA % cols;
+    int br = tileB / cols, bc = tileB % cols;
+
+    int ax = ac * tileW;
+    int ay = ar * tileH;
+    int bx = bc * tileW;
+    int by = br * tileH;
+
+    int w = Math.min(Math.min(tileW, W - ax), Math.min(tileW, W - bx));
+    int h = Math.min(Math.min(tileH, H - ay), Math.min(tileH, H - by));
+    if (w <= 0 || h <= 0) return Long.MAX_VALUE / 4;
+
+    long diff = 0;
+    for (int y = 0; y < h; y++) {
+      int rowA = (ay + y) * W;
+      int rowB = (by + y) * W;
+      for (int x = 0; x < w; x++) {
+        int pA = pxA[rowA + (ax + x)];
+        int pB = pxB[rowB + (bx + x)];
+        diff += rgbAbsDiff(pA, pB);
+      }
+    }
+    return diff;
+  }
+
+  private static int[] hungarian(long[][] cost) {
+    int n = cost.length;
+    if (n == 0 || cost[0].length != n) throw new IllegalArgumentException("Matrix harus persegi");
+
+    double[] u = new double[n + 1];
+    double[] v = new double[n + 1];
+    int[] p = new int[n + 1];
+    int[] way = new int[n + 1];
+
+    for (int i = 1; i <= n; i++) {
+      p[0] = i;
+      int j0 = 0;
+      double[] minv = new double[n + 1];
+      boolean[] used = new boolean[n + 1];
+      Arrays.fill(minv, Double.POSITIVE_INFINITY);
+      Arrays.fill(used, false);
+      do {
+        used[j0] = true;
+        int i0 = p[j0];
+        double delta = Double.POSITIVE_INFINITY;
+        int j1 = 0;
+        for (int j = 1; j <= n; j++) {
+          if (used[j]) continue;
+          double cur = cost[i0 - 1][j - 1] - u[i0] - v[j];
+          if (cur < minv[j]) {
+            minv[j] = cur;
+            way[j] = j0;
+          }
+          if (minv[j] < delta) {
+            delta = minv[j];
+            j1 = j;
+          }
+        }
+        for (int j = 0; j <= n; j++) {
+          if (used[j]) {
+            u[p[j]] += delta;
+            v[j] -= delta;
+          } else {
+            minv[j] -= delta;
+          }
+        }
+        j0 = j1;
+      } while (p[j0] != 0);
+      do {
+        int j1 = way[j0];
+        p[j0] = p[j1];
+        j0 = j1;
+      } while (j0 != 0);
+    }
+
+    int[] assignment = new int[n];
+    for (int j = 1; j <= n; j++) {
+      if (p[j] == 0) throw new IllegalStateException("Solusi tidak valid");
+      assignment[p[j] - 1] = j - 1;
+    }
+    return assignment;
   }
 
   private static double fast2Pow(double x) {

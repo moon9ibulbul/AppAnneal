@@ -22,6 +22,13 @@
       android:layout_width="match_parent"
       android:layout_height="wrap_content"/>
 
+    <Button
+      android:id="@+id/btnPickOriginal"
+      android:text="Pilih Gambar Asli (Opsional)"
+      android:layout_marginTop="8dp"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"/>
+
     <EditText
       android:id="@+id/etRows"
       android:hint="Rows (mis. 5)"
@@ -62,6 +69,30 @@
       android:max="100"
       android:layout_width="match_parent"
       android:layout_height="wrap_content"/>
+
+    <!-- PREVIEW ORIGINAL -->
+    <TextView
+      android:text="Preview Referensi (Asli)"
+      android:textStyle="bold"
+      android:layout_marginTop="12dp"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"/>
+
+    <HorizontalScrollView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:fillViewport="false">
+      <FrameLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content">
+        <ImageView
+          android:id="@+id/ivOriginal"
+          android:layout_width="wrap_content"
+          android:layout_height="wrap_content"
+          android:scaleType="matrix"
+          android:contentDescription="Original Preview"/>
+      </FrameLayout>
+    </HorizontalScrollView>
 
     <!-- PREVIEW INPUT -->
     <TextView

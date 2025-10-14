@@ -25,19 +25,22 @@ import java.util.concurrent.Executors;
 
 public class MainActivity extends AppCompatActivity {
 
-  private Button btnPickImage, btnRun, btnCopy, btnApplyPermutation;
+  private Button btnPickImage, btnPickOriginal, btnRun, btnCopy, btnApplyPermutation;
   private EditText etRows, etCols, etIterations, etTemp, etPermutation;
   private ProgressBar progressBar;
   private TextView tvLog;
-  private ImageView ivInput, ivOutput;
+  private ImageView ivOriginal, ivInput, ivOutput;
 
   private Uri pickedImage = null;
+  private Uri pickedOriginal = null;
   private String lastPermutationText = "";
   private int[] lastPerm0;        // 0-based internal
   private int lastRows = 0, lastCols = 0;
   private Bitmap srcBitmap = null;
+  private Bitmap refBitmap = null;
 
   // Toggles overlay angka (default: ON supaya langsung kelihatan)
+  private boolean showNumbersOriginal = true;
   private boolean showNumbersInput = true;
   private boolean showNumbersOutput = true;
 
@@ -52,12 +55,22 @@ public class MainActivity extends AppCompatActivity {
         }
       });
 
+  private final ActivityResultLauncher<String> originalPicker =
+      registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
+        if (uri != null) {
+          pickedOriginal = uri;
+          toast("Gambar referensi dipilih: " + uri);
+          loadOriginalPreviewAsync();
+        }
+      });
+
   @Override
   protected void onCreate(@Nullable Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
     setContentView(R.layout.activity_main);
 
     btnPickImage = findViewById(R.id.btnPickImage);
+    btnPickOriginal = findViewById(R.id.btnPickOriginal);
     btnRun = findViewById(R.id.btnRun);
     btnCopy = findViewById(R.id.btnCopy);
     btnApplyPermutation = findViewById(R.id.btnApplyPermutation);
@@ -70,17 +83,58 @@ public class MainActivity extends AppCompatActivity {
 
     progressBar = findViewById(R.id.progressBar);
     tvLog = findViewById(R.id.tvLog);
+    ivOriginal = findViewById(R.id.ivOriginal);
     ivInput = findViewById(R.id.ivInput);
     ivOutput = findViewById(R.id.ivOutput);
 
     btnPickImage.setOnClickListener(v -> imagePicker.launch("image/*"));
+    btnPickOriginal.setOnClickListener(v -> originalPicker.launch("image/*"));
     btnRun.setOnClickListener(v -> runAnneal());
     btnCopy.setOnClickListener(v -> copyPermutation());
     btnApplyPermutation.setOnClickListener(v -> applyManualPermutation());
 
     // Long-press toggle angka untuk masing-masing preview
+    ivOriginal.setOnLongClickListener(v -> { showNumbersOriginal = !showNumbersOriginal; refreshOriginalPreview(); return true; });
     ivInput.setOnLongClickListener(v -> { showNumbersInput = !showNumbersInput; refreshInputPreview(); return true; });
     ivOutput.setOnLongClickListener(v -> { showNumbersOutput = !showNumbersOutput; refreshOutputPreview(); return true; });
+  }
+
+  // ==== PREVIEW ORIGINAL ====
+
+  private void loadOriginalPreviewAsync() {
+    if (pickedOriginal == null) return;
+    executor.execute(() -> {
+      try {
+        refBitmap = BitmapIO.read(getContentResolver(), pickedOriginal);
+        runOnUiThread(this::refreshOriginalPreview);
+      } catch (IOException e) {
+        runOnUiThread(() -> toast("Gagal baca referensi: " + e.getMessage()));
+      }
+    });
+  }
+
+  private void refreshOriginalPreview() {
+    if (refBitmap == null) return;
+    Integer r = tryParseInt(etRows.getText().toString().trim());
+    Integer c = tryParseInt(etCols.getText().toString().trim());
+
+    if (showNumbersOriginal && r != null && c != null && r > 0 && c > 0) {
+      try {
+        int[] idPerm = new int[r * c];
+        for (int i = 0; i < idPerm.length; i++) idPerm[i] = i;
+        Bitmap numbered = PermutationAnnealer2D.reconstructWithNumbers(refBitmap, r, c, idPerm);
+        setImageFullSize(ivOriginal, numbered);
+        ivOriginal.setContentDescription("Original Preview (numbers ON)");
+        toastQuick("Angka referensi: ON");
+        return;
+      } catch (Throwable ignored) {
+        // fallback ke plain jika gagal
+      }
+    }
+    setImageFullSize(ivOriginal, refBitmap);
+    ivOriginal.setContentDescription("Original Preview (numbers OFF)");
+    if (showNumbersOriginal) toastQuick("Angka referensi: OFF (rows/cols belum valid)");
+    else toastQuick("Angka referensi: OFF");
   }
 
   // ==== PREVIEW INPUT ====
@@ -163,6 +217,10 @@ public class MainActivity extends AppCompatActivity {
           srcBitmap = BitmapIO.read(getContentResolver(), pickedImage);
           runOnUiThread(this::refreshInputPreview);
         }
+        if (refBitmap == null && pickedOriginal != null) {
+          refBitmap = BitmapIO.read(getContentResolver(), pickedOriginal);
+          runOnUiThread(this::refreshOriginalPreview);
+        }
         int W = srcBitmap.getWidth(), H = srcBitmap.getHeight();
         if (W % cols != 0 || H % rows != 0) {
           runOnUiThread(() ->
@@ -170,15 +228,28 @@ public class MainActivity extends AppCompatActivity {
                   "⚠️ Ukuran gambar (%dx%d) tidak habis dibagi rows=%d, cols=%d\n", W, H, rows, cols)));
         }
 
-        PermutationAnnealer2D.ProgressListener listener = (sec, donePct, iter, temperature, energy) ->
-            runOnUiThread(() -> {
-              progressBar.setProgress((int)Math.min(100, Math.round(donePct)));
-              String line = String.format(Locale.US,
-                  "t=%.2f E=%d iter=%d sec=%d (%.1f%%)\n", temperature, energy, iter, sec, donePct);
-              tvLog.setText(line);
-            });
+        int[] perm0;
+        if (refBitmap != null) {
+          runOnUiThread(() -> tvLog.setText("Menggunakan gambar referensi untuk mencocokkan tile...\n"));
+          PermutationAnnealer2D.TileMatchProgressListener listener = (done, total) ->
+              runOnUiThread(() -> {
+                int pct = total <= 0 ? 0 : (int) Math.min(100, Math.round(done * 100f / total));
+                progressBar.setProgress(pct);
+                tvLog.setText(String.format(Locale.US,
+                    "Mencocokkan tile %d/%d\n", done, total));
+              });
+          perm0 = PermutationAnnealer2D.solveUsingReference(srcBitmap, refBitmap, rows, cols, listener);
+        } else {
+          PermutationAnnealer2D.ProgressListener listener = (sec, donePct, iter, temperature, energy) ->
+              runOnUiThread(() -> {
+                progressBar.setProgress((int)Math.min(100, Math.round(donePct)));
+                String line = String.format(Locale.US,
+                    "t=%.2f E=%d iter=%d sec=%d (%.1f%%)\n", temperature, energy, iter, sec, donePct);
+                tvLog.setText(line);
+              });
 
-        int[] perm0 = PermutationAnnealer2D.solve(srcBitmap, rows, cols, iterations, temp, listener);
+          perm0 = PermutationAnnealer2D.solve(srcBitmap, rows, cols, iterations, temp, listener);
+        }
         lastPerm0 = perm0;
         lastRows = rows; lastCols = cols;
 
